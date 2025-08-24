@@ -1,0 +1,45 @@
+name: Copy Latest Commit Tag to Main
+
+on:
+  push:
+    branches:
+      - main   # run only when commits/merges land in main
+
+jobs:
+  copy-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # fetch full history + tags
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+      - name: Get tag from latest commit before merge
+        id: get_tag
+        run: |
+          # Get parent commit of the merge (the commit from the branch that was merged)
+          PARENT=$(git rev-parse HEAD^)
+          # Check if that commit has a tag
+          TAG=$(git tag --points-at $PARENT || true)
+
+          if [ -z "$TAG" ]; then
+            echo "No tag found on latest merged commit. Skipping..."
+            exit 0
+          fi
+
+          echo "Found tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Copy tag to main merge commit
+        if: steps.get_tag.outputs.tag != ''
+        run: |
+          git tag ${{ steps.get_tag.outputs.tag }} HEAD
+          git push origin ${{ steps.get_tag.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
