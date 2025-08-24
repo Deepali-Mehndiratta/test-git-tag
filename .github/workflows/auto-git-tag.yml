@@ -1,45 +1,36 @@
-name: Copy Latest Commit Tag to Main
+name: Auto Git Tag
 
 on:
   push:
     branches:
-      - main   # run only when commits/merges land in main
+      - main
 
 jobs:
-  copy-tag:
+  copy-single-tag:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # fetch full history + tags
+          fetch-depth: 0
 
-      - name: Configure Git
+      - name: Get the merged commit (feature branch single commit)
+        id: get_parent
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
+          MERGE_COMMIT=$(git rev-parse HEAD)
+          PARENT_COMMIT=$(git rev-parse $MERGE_COMMIT^2)
+          echo "parent_commit=$PARENT_COMMIT" >> $GITHUB_OUTPUT
 
-      - name: Get tag from latest commit before merge
+      - name: Get the single tag from feature commit
         id: get_tag
         run: |
-          # Get parent commit of the merge (the commit from the branch that was merged)
-          PARENT=$(git rev-parse HEAD^)
-          # Check if that commit has a tag
-          TAG=$(git tag --points-at $PARENT || true)
-
-          if [ -z "$TAG" ]; then
-            echo "No tag found on latest merged commit. Skipping..."
-            exit 0
-          fi
-
+          TAG=$(git tag --points-at ${{ steps.get_parent.outputs.parent_commit }})
           echo "Found tag: $TAG"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Copy tag to main merge commit
-        if: steps.get_tag.outputs.tag != ''
+      - name: Move that tag to main merge commit
         run: |
-          git tag ${{ steps.get_tag.outputs.tag }} HEAD
-          git push origin ${{ steps.get_tag.outputs.tag }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git config user.name "github-actions"
+          git config user.email "github-actions@af.noreply.github.com"
+          git tag ${{ steps.get_tag.outputs.tag }} -f
+          git push origin ${{ steps.get_tag.outputs.tag }} -f
