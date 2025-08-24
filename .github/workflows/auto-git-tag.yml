@@ -9,50 +9,53 @@ jobs:
   copy-tag:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
-          fetch-depth: 0   # so tags are included
+          fetch-depth: 0   # important: we need full history + tags
 
-      - name: Find PR that triggered this push
+      - name: Detect PR number from squash commit
         id: pr
-        uses: actions-ecosystem/action-get-merged-pull-request@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get tag from PR branch head commit
-        id: get_tag
         run: |
-          PR_BRANCH=${{ steps.pr.outputs.head_ref }}
-          echo "Checking branch: $PR_BRANCH"
+          PR_NUMBER=$(git log -1 --pretty=%B | sed -n 's/.*#\([0-9]\+\).*/\1/p')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR number found in commit message. Skipping..."
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          else
+            echo "Detected PR: #$PR_NUMBER"
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
 
-          # Fetch tags from the PR branch
-          git fetch origin $PR_BRANCH --tags
+      - name: Get tag from PR head commit
+        id: get_tag
+        if: steps.pr.outputs.pr_number != ''
+        run: |
+          # Fetch PR metadata from GitHub
+          PR_HEAD_SHA=$(gh pr view ${{ steps.pr.outputs.pr_number }} --json headRefOid -q .headRefOid)
 
-          # Get commit id of the PR branch head
-          PR_COMMIT=$(git rev-parse origin/$PR_BRANCH)
-          echo "PR_COMMIT=$PR_COMMIT"
+          echo "PR head commit SHA: $PR_HEAD_SHA"
 
-          # See if that commit has a tag
-          TAG=$(git tag --points-at $PR_COMMIT | head -n 1 || true)
+          TAG=$(git tag --points-at $PR_HEAD_SHA | head -n 1 || true)
 
           if [ -z "$TAG" ]; then
-            echo "No tag found on PR branch commit. Skipping..."
+            echo "No tag found on PR head commit. Skipping..."
             echo "tag=" >> $GITHUB_OUTPUT
           else
             echo "Found tag: $TAG"
             echo "tag=$TAG" >> $GITHUB_OUTPUT
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy tag to merge commit on main
+      - name: Move tag to squash commit
         if: steps.get_tag.outputs.tag != ''
         run: |
-          git config user.name "github-actions
-          git config user.email "github-actions@af.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           MERGE_COMMIT=$(git rev-parse HEAD)
-          TAG=${{ steps.get_tag.outputs.tag }}
+          echo "Moving tag '${{ steps.get_tag.outputs.tag }}' → $MERGE_COMMIT"
 
-          echo "Tagging merge commit $MERGE_COMMIT with $TAG"
-          git tag -f $TAG $MERGE_COMMIT
-          git push origin -f $TAG
+          git tag -f ${{ steps.get_tag.outputs.tag }} $MERGE_COMMIT
+          git push origin ${{ steps.get_tag.outputs.tag }} -f
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
