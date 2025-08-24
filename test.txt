@@ -1,1 +1,2 @@
 ADD test file for testing git tagging 
+Edit this file to test git tagging work flow named auto-git-tag
